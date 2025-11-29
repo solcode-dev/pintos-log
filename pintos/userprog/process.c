@@ -74,7 +74,15 @@ tid_t process_create_initd(const char *file_name)
 static void initd(void *f_name)
 {
 #ifdef VM
+	printf("\n========== 프로세스 SPT 초기화 ==========\n");
+	printf("스레드: %s\n", thread_current()->name);
+
 	supplemental_page_table_init(&thread_current()->spt);
+
+	printf("SPT 초기화 완료:\n");
+	printf("  - bucket_cnt: %zu\n", thread_current()->spt.pages.bucket_cnt);
+	printf("  - elem_cnt: %zu\n", thread_current()->spt.pages.elem_cnt);
+	printf("==========================================\n\n");
 #endif
 
 	process_init();
@@ -664,10 +672,7 @@ static bool install_page(void *upage, void *kpage, bool writable)
 			pml4_set_page(t->pml4, upage, kpage, writable));
 }
 #else
-/* From here, codes will be used after project 3.
- * If you want to implement the function for only project 2, implement it on the
- * upper block. */
-
+// TODO: project 3.
 static bool lazy_load_segment(struct page *page, void *aux)
 {
 	/* TODO: Load the segment from the file */

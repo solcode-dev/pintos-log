@@ -34,3 +34,6 @@ core
 
 #test file
 .test_status
+
+# 개인파일
+.soyoung

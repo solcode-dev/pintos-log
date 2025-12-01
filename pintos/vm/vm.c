@@ -171,15 +171,20 @@ static bool vm_handle_wp(struct page *page UNUSED)
 }
 
 /* Return true on success */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
-						 bool write UNUSED, bool not_present UNUSED)
+bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write, bool not_present)
 {
-	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-	struct page *page = NULL;
-	/* TODO: Validate the fault */
-	/* TODO: Your code goes here */
+	if (!is_user_vaddr(addr) || (!not_present && write) || VM_BOTTOM > addr)
+		return false;
 
-	return vm_do_claim_page(page);
+	struct supplemental_page_table *spt = &thread_current()->spt;
+	struct page *fault_page = spt_find_page(spt, addr);
+
+	if (fault_page)
+		return vm_do_claim_page(fault_page);
+
+	//TODO:  스택 여부 판단 및 스택
+
+	return false;
 }
 
 /* Free the page.

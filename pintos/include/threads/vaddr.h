@@ -31,6 +31,8 @@
 /* Round down to nearest page boundary. */
 #define pg_round_down(va) (void *)((uint64_t)(va) & ~PGMASK)
 
+#define VM_BOTTOM 0x0400000
+
 /* Kernel virtual address start */
 #define KERN_BASE LOADER_KERN_BASE
 

@@ -1,11 +1,13 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
-#include "threads/malloc.h"
-#include "threads/mmu.h"
 #include "vm/vm.h"
-#include "vm/inspect.h"
-#include "vaddr.h"
+
 #include <string.h>
+
+#include "threads/malloc.h"
+#include "vm/inspect.h"
+#include "include/threads/vaddr.h"
+#include "include/threads/mmu.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -42,24 +44,28 @@ static struct frame *vm_evict_frame(void);
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
- * `vm_alloc_page`. */
-// page 생성 + spt에 등록하는 함수입니다
+ * `vm_alloc_page`.
+ *
+ * page를 생성하고, spt에 등록한다. */
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
 									vm_initializer *init, void *aux)
 {
-
 	ASSERT(VM_TYPE(type) != VM_UNINIT)
 
 	struct supplemental_page_table *spt = &thread_current()->spt;
 
 	// 1. spt에 이미 등록된 페이지인지 확인
-	if (spt_find_page(spt, upage) != NULL)
-		return false;
+	if (spt_find_page(spt, upage) != NULL) {
+		printf("이미 등록된 페이지\n");
+		goto err;
+	}
 
 	// 2. struct page
-	struct page *page = malloc(sizeof(struct page));
-	if (page == NULL)
-		return false;
+	struct page *page = (struct page *)malloc(sizeof(struct page));
+	if (page == NULL) {
+		printf("malloc 실패\n");
+		goto err;
+	}
 
 	// 3. type에 맞는 initializer를 설정한다.
 	bool (*initializer)(struct page *, enum vm_type, void *kva);
@@ -71,15 +77,21 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 			initializer = file_backed_initializer;
 			break;
 		default:
+			printf("Unknown VM_TYPE %d\n", VM_TYPE(type));
 			goto err;
 	}
 
 	// page구조체에 값 넣기
 	uninit_new(page, upage, init, type, aux, initializer);
-	page->writable = writable;
 
-	if (!spt_insert_page(spt, page))
+	/* TODO: should modify the field after calling the uninit_new. */
+	page->writable = writable;
+	page->type = type;
+
+	if (!spt_insert_page(spt, page)) {
+		printf("spt_insert_page fail \n");
 		goto err;
+	}
 
 	return true;
 
@@ -88,7 +100,8 @@ err:
 	return false;
 }
 
-// spt에서 va로 페이지를 찾아 반환하는 함수
+/* va를 인자로 spt에서 페이지를 찾아 반환하는 함수
+ * 검색에 실패하면 NULL 값을 반환한다. */
 struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 {
 	if (va == NULL)
@@ -108,7 +121,8 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 	return hash_entry(find_elem, struct page, spt_hash_elem);
 }
 
-// spt에 페이지 추가
+/* spt에 페이지를 추가
+ * 성공하면 true, 실패하면 false를 반환 */
 bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
 	if (spt == NULL || page == NULL)
@@ -180,9 +194,18 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
 						 bool write UNUSED, bool not_present UNUSED)
 {
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-	struct page *page = NULL;
+	struct page *page = spt_find_page(spt, addr);
+
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+
+	/* spt에 등록되지 않은 주소이면 */
+	if (page == NULL)
+		return false;
+
+	/* 유효하지 않은 접근이면 */
+	if ((write && !page->writable) || (!user && is_kernel_vaddr(page->va)))
+		return false;
 
 	return vm_do_claim_page(page);
 }
@@ -231,13 +254,12 @@ static bool vm_do_claim_page(struct page *page)
 
 // spt helpers
 static uint64_t spt_hash_func(const struct hash_elem *elem, void *aux UNUSED);
-static uint64_t spt_hash_func(const struct hash_elem *elem, void *aux UNUSED);
 static bool spt_hash_less_func(const struct hash_elem *elem_a, const struct hash_elem *elem_b,
 							   void *aux UNUSED);
 static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED);
 static void copy_page_from_spt(struct hash_elem *elem, void *aux);
 
-// 해시테이블을 초기화하는 함수
+// spt 테이블을 초기화하는 함수
 void supplemental_page_table_init(struct supplemental_page_table *spt)
 {
 	if (spt == NULL)
@@ -283,13 +305,13 @@ static uint64_t spt_hash_func(const struct hash_elem *elem, void *aux UNUSED)
 }
 
 /* page가 같은지, 혹은 순서가 앞서는지를 va를 기준으로 판단하는 함수
- * a가 b보다 더 크면 true를 반환한다. */
+ * a가 b보다 더 작으면 true를 반환한다. */
 static bool spt_hash_less_func(const struct hash_elem *elem_a, const struct hash_elem *elem_b,
 							   void *aux UNUSED)
 {
 	struct page *page_a = hash_entry(elem_a, struct page, spt_hash_elem);
 	struct page *page_b = hash_entry(elem_b, struct page, spt_hash_elem);
-	return page_a->va > page_b->va;
+	return page_a->va < page_b->va;
 }
 
 // spt에서 해당 page를 삭제합니다

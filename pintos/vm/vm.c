@@ -111,7 +111,7 @@ bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
 	if (spt == NULL || page == NULL)
 		return false;
-	return hash_insert(&spt->spt_hash, page) == NULL;
+	return hash_insert(&spt->spt_hash, &page->spt_hash_elem) == NULL;
 }
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page)

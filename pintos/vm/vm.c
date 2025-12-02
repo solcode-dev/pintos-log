@@ -1,10 +1,10 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include "vm/vm.h"
 #include "threads/malloc.h"
 #include "threads/mmu.h"
-#include "vm/vm.h"
+#include "threads/vaddr.h"
 #include "vm/inspect.h"
-#include "vaddr.h"
 #include <string.h>
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -91,7 +91,7 @@ err:
 // spt에서 va로 페이지를 찾아 반환하는 함수
 struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 {
-	if (va == NULL)
+	if (va == NULL || hash_empty(&spt->spt_hash))
 		return NULL;
 
 	// 1. 페이지 경계로 va를 내린다
@@ -176,13 +176,24 @@ static bool vm_handle_wp(struct page *page UNUSED)
 }
 
 /* Return true on success */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
-						 bool write UNUSED, bool not_present UNUSED)
+bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write, bool not_present)
 {
-	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-	struct page *page = NULL;
-	/* TODO: Validate the fault */
-	/* TODO: Your code goes here */
+	struct supplemental_page_table *spt = &thread_current()->spt;
+
+	// 1. 유효성 검사
+	if (spt == NULL || addr < VM_BOTTOM || is_kernel_vaddr(addr))
+		return false;
+
+	// 2. spt에 있는지 찾기
+	struct page *page = spt_find_page(spt, addr);
+	if (page == NULL) {
+		// TODO: grow stack 구현하기
+		return false;
+	}
+
+	// 3. write 시도라면 권한 검사
+	if (!page->writable && write)
+		return false;
 
 	return vm_do_claim_page(page);
 }
@@ -221,7 +232,7 @@ static bool vm_do_claim_page(struct page *page)
 	page->frame = frame;
 
 	// 3. pte 생성
-	bool success = pml4_set_page(&thread_current()->pml4, page->va, frame->kva, page->writable);
+	bool success = pml4_set_page(thread_current()->pml4, page->va, frame->kva, page->writable);
 	if (!success)
 		return false;
 
@@ -283,13 +294,13 @@ static uint64_t spt_hash_func(const struct hash_elem *elem, void *aux UNUSED)
 }
 
 /* page가 같은지, 혹은 순서가 앞서는지를 va를 기준으로 판단하는 함수
- * a가 b보다 더 크면 true를 반환한다. */
+ * a가 b보다 작으면 true를 반환한다. */
 static bool spt_hash_less_func(const struct hash_elem *elem_a, const struct hash_elem *elem_b,
 							   void *aux UNUSED)
 {
 	struct page *page_a = hash_entry(elem_a, struct page, spt_hash_elem);
 	struct page *page_b = hash_entry(elem_b, struct page, spt_hash_elem);
-	return page_a->va > page_b->va;
+	return page_a->va < page_b->va;
 }
 
 // spt에서 해당 page를 삭제합니다
@@ -298,8 +309,8 @@ static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED)
 {
 	struct page *curr_page = hash_entry(elem, struct page, spt_hash_elem);
 
-	if (page_get_type(curr_page) == VM_FILE) // NOTE
-		swap_out(curr_page);
+	// if (page_get_type(curr_page) == VM_FILE) // NOTE
+	// 	swap_out(curr_page);
 
 	vm_dealloc_page(curr_page);
 }
@@ -307,6 +318,7 @@ static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED)
 // spt의 해당 page를 다른 spt로 복사합니다
 static void copy_page_from_spt(struct hash_elem *elem, void *aux)
 {
+	// TODO 구조 수정
 	struct supplemental_page_table *dst_spt = aux;
 
 	struct page *src_page = hash_entry(elem, struct page, spt_hash_elem);

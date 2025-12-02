@@ -276,21 +276,22 @@ int process_wait(tid_t child_tid)
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void)
 {
-	struct thread *cur = thread_current();
+	struct thread *curr = thread_current();
 
-	if (cur->pml4 == NULL)
-		return;
-	printf("%s: exit(%d)\n", cur->name, cur->my_entry->exit_status);
-	if (cur->current_file) {
-		file_allow_write(cur->current_file);
+	if (curr->pml4 != NULL)
+		printf("%s: exit(%d)\n", curr->name, curr->my_entry->exit_status);
+
+	if (curr->current_file) {
+		file_allow_write(curr->current_file);
 		lock_acquire(&file_lock);
-		file_close(cur->current_file);
+		file_close(curr->current_file);
 		lock_release(&file_lock);
-		cur->current_file = NULL;
+		curr->current_file = NULL;
 	}
-	fd_clean(cur);
+
+	fd_clean(curr);
 	process_cleanup();
-	sema_up(&cur->my_entry->wait_sema);
+	sema_up(&curr->my_entry->wait_sema);
 }
 
 /* Free the current process's resources. */
@@ -407,6 +408,7 @@ static bool load(const char *file_name, int argc, char **argv, struct intr_frame
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate(thread_current());
+	supplemental_page_table_init(&thread_current()->spt);
 
 	/* Open executable file. */
 	lock_acquire(&file_lock);
@@ -673,18 +675,12 @@ static bool install_page(void *upage, void *kpage, bool writable)
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-static struct vm_file_aux {
-	struct file *file;
-	off_t ofs;
-	size_t page_read_bytes;
-};
-
 static bool lazy_load_segment(struct page *page, void *aux)
 {
-	struct vm_file_aux *vm_file_aux = (struct vm_file_aux *)aux;
-	struct file *file = vm_file_aux->file;
-	off_t ofs = vm_file_aux->ofs;
-	size_t page_read_bytes = vm_file_aux->page_read_bytes;
+	struct file_page *file_page_aux = (struct file_page *)aux;
+	struct file *file = file_page_aux->file;
+	off_t ofs = file_page_aux->offset;
+	size_t page_read_bytes = file_page_aux->page_read_bytes;
 
 	ASSERT((page_read_bytes + PGSIZE - page_read_bytes) % PGSIZE == 0);
 	ASSERT(ofs % PGSIZE == 0);
@@ -694,8 +690,9 @@ static bool lazy_load_segment(struct page *page, void *aux)
 		palloc_free_page(page->frame->kva);
 		return false;
 	}
-	
+
 	memset(page->frame->kva + page_read_bytes, 0, PGSIZE - page_read_bytes);
+	free(aux);
 
 	return true;
 }
@@ -729,19 +726,20 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		struct vm_file_aux *vm_file_aux = malloc(sizeof(*vm_file_aux));
-		*vm_file_aux = (struct vm_file_aux){
+		struct file_page *file_page_aux = malloc(sizeof(*file_page_aux));
+		*file_page_aux = (struct file_page){
 			.file = file,
-			.ofs = ofs,
-			.page_read_bytes = page_read_bytes //
+			.offset = ofs,
+			.page_read_bytes = page_read_bytes,
 		};
 		if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable, lazy_load_segment,
-											vm_file_aux))
+											file_page_aux))
 			return false;
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
+		ofs += page_read_bytes;
 		upage += PGSIZE;
 	}
 	return true;
@@ -750,14 +748,19 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool setup_stack(struct intr_frame *if_)
 {
-	bool success = false;
+	// bool success = false;
 	void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
 
-	/* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-	/* TODO: Your code goes here */
+	// 등록 하고 할당
+	// spt 에 스택 페이지 등록
+	if (!vm_alloc_page(VM_ANON | VM_STACK_MAKER, stack_bottom, true))
+		return false;
 
-	return success;
+	// 물리 프레임 할당
+	if (!vm_claim_page(stack_bottom))
+		return false;
+
+	if_->rsp = USER_STACK;
+	return true;
 }
 #endif /* VM */

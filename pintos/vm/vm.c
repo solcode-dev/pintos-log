@@ -91,7 +91,7 @@ err:
 // spt에서 va로 페이지를 찾아 반환하는 함수
 struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 {
-	if (va == NULL)
+	if (va == NULL || hash_empty(&spt->spt_hash))
 		return NULL;
 
 	// 1. 페이지 경계로 va를 내린다

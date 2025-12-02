@@ -269,6 +269,7 @@ int process_wait(tid_t child_tid)
 
 	int result = child_info->exit_status;
 	list_remove(&child_info->child_elem);
+	supplemental_page_table_kill(&cur->spt);
 	free(child_info);
 	return result;
 }

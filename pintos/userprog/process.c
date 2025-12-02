@@ -25,6 +25,7 @@
 #include "userprog/tss.h"
 #ifdef VM
 #include "vm/vm.h"
+#include "vm/file.h"
 #endif
 
 struct fork_struct {
@@ -58,24 +59,24 @@ tid_t process_create_initd(const char *file_name)
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
-	fn_copy = palloc_get_page(0);
+	fn_copy = malloc(strlen(file_name) + 1);
 	if (fn_copy == NULL)
 		return TID_ERROR;
-	strlcpy(fn_copy, file_name, PGSIZE);
+	strlcpy(fn_copy, file_name, strlen(file_name) + 1);
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create(strtok_r(file_name, " ", &file_name), PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
-		palloc_free_page(fn_copy);
+		free(fn_copy);
 	return tid;
 }
 
 /* A thread function that launches first user process. */
 static void initd(void *f_name)
 {
-#ifdef VM
-	supplemental_page_table_init(&thread_current()->spt);
-#endif
+	// #ifdef VM
+	// 	supplemental_page_table_init(&thread_current()->spt);
+	// #endif
 
 	process_init();
 
@@ -232,7 +233,7 @@ int process_exec(void *f_name)
 	success = load(file_name, argc, argv, &_if);
 
 	/* If load failed, quit. */
-	palloc_free_page(f_name);
+	free(f_name);
 	if (!success)
 		return -1;
 
@@ -280,7 +281,9 @@ void process_exit(void)
 
 	if (cur->pml4 == NULL)
 		return;
+
 	printf("%s: exit(%d)\n", cur->name, cur->my_entry->exit_status);
+
 	if (cur->current_file) {
 		file_allow_write(cur->current_file);
 		lock_acquire(&file_lock);
@@ -409,8 +412,10 @@ static bool load(const char *file_name, int argc, char **argv, struct intr_frame
 	}
 	process_activate(thread_current());
 
-	/* initialize supplemental page table */
+/* initialize supplemental page table */
+#ifdef VM
 	supplemental_page_table_init(&thread_current()->spt);
+#endif
 
 	/* Open executable file. */
 	lock_acquire(&file_lock);
@@ -491,15 +496,14 @@ static bool load(const char *file_name, int argc, char **argv, struct intr_frame
 	if (!setup_stack(if_))
 		goto done;
 
-	build_user_stack(if_, argc, argv);
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
+	build_user_stack(if_, argc, argv);
 	success = true;
-
 done:
 	/* We arrive here whether the load is successful or not. */
 	return success;
@@ -558,7 +562,7 @@ static void build_user_stack(struct intr_frame *if_, int argc, char **argv)
 		memcpy(if_->rsp, argv[i], len);
 	}
 
-	// paading
+	// padding
 	char *temp = if_->rsp;
 	if_->rsp &= ~0xF;
 	if (temp - if_->rsp > 0)
@@ -681,12 +685,6 @@ static bool install_page(void *upage, void *kpage, bool writable)
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-static struct vm_file_aux {
-	struct file *file;
-	off_t ofs;
-	size_t page_read_bytes;
-};
-
 static bool lazy_load_segment(struct page *page, void *aux)
 {
 	struct vm_file_aux *vm_file_aux = (struct vm_file_aux *)aux;
@@ -766,6 +764,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += page_read_bytes;
 	}
 	return true;
 }
@@ -786,6 +785,7 @@ static bool setup_stack(struct intr_frame *if_)
 	if (!vm_claim_page(stack_bottom))
 		return false;
 
+	// memset(stack_bottom, 0, PGSIZE);
 	if_->rsp = USER_STACK;
 
 	return true;

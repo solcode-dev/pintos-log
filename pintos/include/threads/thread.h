@@ -115,7 +115,6 @@ struct thread {
 	struct child_info *my_entry;
 
 	struct fd_table *fd_table;
-
 	struct file *current_file;
 #endif
 #ifdef VM

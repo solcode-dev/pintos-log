@@ -139,10 +139,12 @@ static int syscall_exec(const char *cmd_line)
 {
 	if (cmd_line == NULL || !valid_address(cmd_line, false))
 		syscall_exit(-1);
-	char *copy_cmd_line = palloc_get_page(0);
+
+	char *copy_cmd_line = malloc(strlen(cmd_line) + 1);
 	if (copy_cmd_line == NULL)
 		syscall_exit(-1);
-	strlcpy(copy_cmd_line, cmd_line, PGSIZE); // 반드시 유효 메모리 확보
+
+	strlcpy(copy_cmd_line, cmd_line, strlen(cmd_line) + 1); // 반드시 유효 메모리 확보
 
 	process_exec(copy_cmd_line);
 	syscall_exit(-1);

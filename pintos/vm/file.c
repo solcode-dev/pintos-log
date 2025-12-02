@@ -26,25 +26,26 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 	/* Set up the handler */
 	page->operations = &file_ops;
 	struct vm_file_aux *aux = page->uninit.aux;
-
 	struct file_page *file_page = &page->file;
 
 	file_page->file = aux->file;
 	file_page->offset = aux->ofs;
 	file_page->page_read_bytes = aux->page_read_bytes;
-	file_page->page_zero_bytes = aux->page_zero_bytes;
+	return true;
 }
 
 /* Swap in the page by read contents from the file. */
 static bool file_backed_swap_in(struct page *page, void *kva)
 {
 	struct file_page *file_page UNUSED = &page->file;
+	return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page)
 {
 	struct file_page *file_page UNUSED = &page->file;
+	return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */

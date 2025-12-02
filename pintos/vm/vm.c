@@ -193,18 +193,24 @@ static bool vm_handle_wp(struct page *page UNUSED)
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
 						 bool write UNUSED, bool not_present UNUSED)
 {
+	if (is_kernel_vaddr(addr) || addr == NULL)
+		return false;
+
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
 	struct page *page = spt_find_page(spt, addr);
 
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 
+	// printf("vm_try_handle_fault: addr: %p, user: %d, write: %d, not_present: %d \n", addr, user,
+	// 	   write, not_present);
+
 	/* spt에 등록되지 않은 주소이면 */
 	if (page == NULL)
 		return false;
 
 	/* 유효하지 않은 접근이면 */
-	if ((write && !page->writable) || (!user && is_kernel_vaddr(page->va)))
+	if ((write && !page->writable))
 		return false;
 
 	return vm_do_claim_page(page);
@@ -244,7 +250,7 @@ static bool vm_do_claim_page(struct page *page)
 	page->frame = frame;
 
 	// 3. pte 생성
-	bool success = pml4_set_page(&thread_current()->pml4, page->va, frame->kva, page->writable);
+	bool success = pml4_set_page(thread_current()->pml4, page->va, frame->kva, page->writable);
 	if (!success)
 		return false;
 
@@ -320,8 +326,8 @@ static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED)
 {
 	struct page *curr_page = hash_entry(elem, struct page, spt_hash_elem);
 
-	if (page_get_type(curr_page) == VM_FILE) // NOTE
-		swap_out(curr_page);
+	// if (page_get_type(curr_page) == VM_FILE) // NOTE
+	// 	swap_out(curr_page);
 
 	vm_dealloc_page(curr_page);
 }

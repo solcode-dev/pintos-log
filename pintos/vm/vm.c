@@ -226,7 +226,7 @@ static bool vm_do_claim_page(struct page *page)
 	page->frame = frame;
 
 	// 3. pte 생성
-	bool success = pml4_set_page(&thread_current()->pml4, page->va, frame->kva, page->writable);
+	bool success = pml4_set_page(thread_current()->pml4, page->va, frame->kva, page->writable);
 	if (!success)
 		return false;
 

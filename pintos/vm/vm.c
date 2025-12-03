@@ -264,16 +264,11 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst,
 	// 0. 널포인터 체크
 	if (dst == NULL || src == NULL)
 		return false;
-
 	// 1. dst를 비운다
 	hash_clear(&dst->spt_hash, remove_page_from_spt);
 
-	// 2.src 순회 중 dst 참조를 위해 aux에 dst 할당
-	src->spt_hash.aux = dst;
-
-	// 3. 순회를 하며 copy_page_from_spt 호출
+	// 2. 순회를 하며 copy_page_from_spt 호출
 	hash_apply(&src->spt_hash, copy_page_from_spt);
-	src->spt_hash.aux = NULL;
 
 	return true;
 }
@@ -318,12 +313,27 @@ static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED)
 // spt의 해당 page를 다른 spt로 복사합니다
 static void copy_page_from_spt(struct hash_elem *elem, void *aux)
 {
-	// TODO 구조 수정
-	struct supplemental_page_table *dst_spt = aux;
-
 	struct page *src_page = hash_entry(elem, struct page, spt_hash_elem);
-	struct page *dst_page = malloc(sizeof(struct page));
-	memcpy(dst_page, src_page, sizeof(struct page));
 
-	hash_insert(&dst_spt->spt_hash, dst_page);
+	switch (VM_TYPE(src_page->operations->type)) {
+		case VM_UNINIT:
+			enum vm_type type = page_get_type(src_page);
+			size_t aux_size = type == VM_FILE ? sizeof(struct file_page) : sizeof(struct anon_page);
+			void *aux_temp = malloc(aux_size);
+			memcpy(aux_temp, src_page->uninit.aux, aux_size);
+			vm_alloc_page_with_initializer(type, src_page->va, src_page->writable,
+										   src_page->uninit.init, aux_temp);
+			return;
+		case VM_FILE:
+			vm_alloc_page_with_initializer(VM_FILE, src_page->va, src_page->writable, NULL,
+										   &src_page->file);
+			break;
+		case VM_ANON:
+			vm_alloc_page_with_initializer(VM_ANON, src_page->va, src_page->writable, NULL,
+										   &src_page->anon);
+			break;
+	}
+	vm_claim_page(src_page->va);
+	struct page *dst_page = spt_find_page(&thread_current()->spt, src_page->va);
+	memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
 }

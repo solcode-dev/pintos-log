@@ -1,10 +1,12 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
 #include "vm/vm.h"
+
 #include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "vm/inspect.h"
+#include "userprog/process.h"
 #include <string.h>
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -47,7 +49,6 @@ static struct frame *vm_evict_frame(void);
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
 									vm_initializer *init, void *aux)
 {
-
 	ASSERT(VM_TYPE(type) != VM_UNINIT)
 
 	struct supplemental_page_table *spt = &thread_current()->spt;
@@ -74,7 +75,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 			goto err;
 	}
 
-	// page구조체에 값 넣기
+	// page 구조체에 값 넣기
 	uninit_new(page, upage, init, type, aux, initializer);
 	page->writable = writable;
 
@@ -318,12 +319,37 @@ static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED)
 // spt의 해당 page를 다른 spt로 복사합니다
 static void copy_page_from_spt(struct hash_elem *elem, void *aux)
 {
-	// TODO 구조 수정
 	struct supplemental_page_table *dst_spt = aux;
-
 	struct page *src_page = hash_entry(elem, struct page, spt_hash_elem);
-	struct page *dst_page = malloc(sizeof(struct page));
-	memcpy(dst_page, src_page, sizeof(struct page));
 
-	hash_insert(&dst_spt->spt_hash, dst_page);
+	if (VM_TYPE(src_page->operations->type) == VM_UNINIT) {
+		vm_alloc_page_with_initializer(page_get_type(src_page), src_page->va, src_page->writable,
+									   src_page->uninit.init, src_page->uninit.aux);
+		return;
+	}
+
+	if (VM_TYPE(src_page->operations->type) == VM_FILE) {
+		struct file_page *file_page_aux = (struct file_page *)malloc(sizeof(*file_page_aux));
+		if (!file_page_aux)
+			return false;
+
+		*file_page_aux = (struct file_page){
+			.file = src_page->file.file,
+			.offset = src_page->file.offset,
+			.page_read_bytes = src_page->file.page_read_bytes,
+		};
+
+		vm_alloc_page_with_initializer(page_get_type(src_page), src_page->va, src_page->writable,
+									   NULL, file_page_aux);
+	}
+
+	if (VM_TYPE(src_page->operations->type) == VM_ANON) {
+		vm_alloc_page(VM_TYPE(src_page->operations->type), src_page->va, src_page->writable);
+	}
+
+	struct page *dst_page = spt_find_page(dst_spt, src_page->va);
+	if (dst_page) {
+		vm_do_claim_page(dst_page);
+		memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+	}
 }

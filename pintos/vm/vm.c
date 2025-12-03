@@ -193,7 +193,7 @@ static bool vm_handle_wp(struct page *page UNUSED)
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
 						 bool write UNUSED, bool not_present UNUSED)
 {
-	if (is_kernel_vaddr(addr) || addr == NULL)
+	if (addr == NULL || is_kernel_vaddr(addr))
 		return false;
 
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;

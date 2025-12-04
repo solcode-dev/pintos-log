@@ -697,20 +697,17 @@ static bool lazy_load_segment(struct page *page, void *aux)
 	return true;
 }
 
-/* Loads a segment starting at offset OFS in FILE at address
- * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
- * memory are initialized, as follows:
- *
- * - READ_BYTES bytes at UPAGE must be read from FILE
- * starting at offset OFS.
- *
- * - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
- *
- * The pages initialized by this function must be writable by the
- * user process if WRITABLE is true, read-only otherwise.
- *
- * Return true if successful, false if a memory allocation error
- * or disk read error occurs. */
+/* 파일 FILE의 OFS 오프셋 위치부터 시작하는 세그먼트를 UPAGE 주소에 로드한다.
+총 READ_BYTES + ZERO_BYTES 바이트 크기의 가상 메모리가 다음과 같이 초기화된다:
+
+- UPAGE에서 시작하는 READ_BYTES 바이트는 FILE에서 OFS 오프셋부터 읽어온다.
+- UPAGE + READ_BYTES 위치부터 시작하는 ZERO_BYTES 바이트는 0으로 채운다.
+
+이 함수에 의해 초기화된 페이지들은 WRITABLE이 true일 경우 사용자 프로세스가 쓸 수 있어야 하고,
+그렇지 않은 경우 읽기 전용이어야 한다.
+
+메모리 할당 오류나 디스크 읽기 오류가 발생하지 않으면 true를 반환하고,
+그러한 오류가 발생하면 false를 반환한다. */
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
 						 uint32_t zero_bytes, bool writable)
 {
@@ -719,24 +716,30 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 	ASSERT(ofs % PGSIZE == 0);
 
 	while (read_bytes > 0 || zero_bytes > 0) {
-		/* Do calculate how to fill this page.
-		 * We will read PAGE_READ_BYTES bytes from FILE
-		 * and zero the final PAGE_ZERO_BYTES bytes. */
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		struct file_page *file_page_aux = malloc(sizeof(*file_page_aux));
-		*file_page_aux = (struct file_page){
-			.file = file,
-			.offset = ofs,
-			.page_read_bytes = page_read_bytes,
-		};
-		if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable, lazy_load_segment,
-											file_page_aux))
-			return false;
+		// 여기서 타입 결정!
+		// swap in/ swap out에만 영향 있음
+		if (read_bytes > 0) {
+			// 파일에서 읽을 게 있음 → VM_FILE (code, .data, mmap)
+			struct file_page *file_page_aux = malloc(sizeof(*file_page_aux));
+			*file_page_aux = (struct file_page){
+				.file = file,
+				.offset = ofs,
+				.page_read_bytes = page_read_bytes,
+			};
 
-		/* Advance. */
+			if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable, lazy_load_segment,
+												file_page_aux))
+				return false;
+
+		} else {
+			// 전부 0으로 채움 → VM_ANON (heap, stack, .bss)
+			if (!vm_alloc_page(VM_ANON, upage, writable))
+				return false;
+		}
+
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		ofs += page_read_bytes;

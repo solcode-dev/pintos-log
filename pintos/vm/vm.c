@@ -40,10 +40,7 @@ static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
 
-/* Create the pending page object with initializer. If you want to create a
- * page, do not create it directly and make it through this function or
- * `vm_alloc_page`. */
-// page 생성 + spt에 등록하는 함수입니다
+// uninit page 생성 + spt에 등록하는 함수입니다
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
 									vm_initializer *init, void *aux)
 {
@@ -153,15 +150,16 @@ static struct frame *vm_get_frame(void)
 	if (frame == NULL)
 		PANIC("(vm_get_frame)");
 
-	*frame = (struct frame){
-		.page = NULL,
-		.kva = palloc_get_page(PAL_USER | PAL_ZERO) // 사용자풀에서 물리 페이지 할당받는다
-	};
+	// 1204 core time
+	frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
 
-	if (frame->kva == NULL)
-		PANIC("(vm_get_frame) TODO: swap out 미구현");
+	if (frame->kva == NULL) {
+		frame = vm_evict_frame(); // victim 선택 + swap out
 
-	ASSERT(frame->page == NULL);
+		if (frame == NULL)
+			PANIC("(vm_get_frame) TODO: swap out 미구현");
+	}
+
 	return frame;
 }
 
@@ -236,7 +234,7 @@ static bool vm_do_claim_page(struct page *page)
 	if (!success)
 		return false;
 
-	// 4. 페이지 초기화 (uninit_initialize)
+	// 4. 실제 데이터를 디스크 > 메모리로 이동 && 페이지 초기화 (uninit_initialize)
 	return swap_in(page, frame->kva);
 }
 

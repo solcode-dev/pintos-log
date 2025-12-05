@@ -22,10 +22,23 @@ void vm_file_init(void)
 /* Initialize the file backed page */
 bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 {
-	/* Set up the handler */
+	if (page == NULL || kva == NULL || type != VM_FILE)
+		return false;
+
+	// 1. VM_FILE에 맞게 operations 변경
 	page->operations = &file_ops;
 
+	// 2. file_page 구조체 초기화
+	struct file_page *aux = page->uninit.aux;
 	struct file_page *file_page = &page->file;
+
+	*file_page = (struct file_page){
+		.offset = aux->offset,
+		.file = aux->file,
+		.page_read_bytes = aux->page_read_bytes,
+	};
+
+	return true;
 }
 
 /* Swap in the page by read contents from the file. */

@@ -49,4 +49,16 @@ static bool anon_swap_out(struct page *page)
 static void anon_destroy(struct page *page)
 {
 	struct anon_page *anon_page = &page->anon;
+
+	if (page->frame != NULL) {
+		// pte에서 매핑 제거
+		pml4_clear_page(thread_current()->pml4, page->va);
+
+		// 물리메모리도 제거
+		palloc_free_page(page->frame->kva);
+
+		// frame 구조체 해제
+		free(page->frame);
+		page->frame = NULL;
+	}
 }

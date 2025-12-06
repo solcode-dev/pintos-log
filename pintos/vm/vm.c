@@ -166,16 +166,16 @@ static struct frame *vm_get_frame(void)
 }
 
 /* Growing the stack. */
-static void vm_stack_growth(void *addr)
+static bool vm_stack_growth(void *addr)
 {
-	if (addr == NULL)
-		return;
+	addr = pg_round_down(addr);
+	if (!vm_alloc_page(VM_ANON | VM_STACK_MAKER, addr, true))
+		return false;
 
-	void *page_addr = pg_round_down(addr);
-	if (page_addr < USER_STACK - (1 << 20))
-		return;
+	if (!vm_claim_page(addr))
+		return false;
 
-	vm_alloc_page(VM_ANON, page_addr, true);
+	return true;
 }
 
 /* Handle the fault on write_protected page */
@@ -194,30 +194,35 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write
 
 	// 2. spt에 있는지 찾기
 	struct page *page = spt_find_page(spt, addr);
-	if (page == NULL) {
-		/*
-		STACK 요청인지, 없는 페이지인지 구분
-		STACK 요청이다 -> fault난 주소가 rsp 근처
-		아니다 -> fault난 주소가 이상한 곳
-		*/
 
-		uint64_t rsp = user ? f->rsp : thread_current()->user_rsp;
+	// Case 1: spt에 페이지가 있는 경우 (lazy loading, swap in)
+	if (page != NULL) {
 
-		if (addr < rsp - 8 || addr < USER_STACK - (1 << 20))
-			/* 스택 성장 아님, fault난 주소가 이상한 곳 */
-			return false;
+		// 페이지가 물리 메모리에 있는 경우 -> write protection fault
+		if (write && !page->writable)
+			return false; // 쓰기 불가능한 페이지에 쓰기 시도
 
-		vm_stack_growth(addr);
-		page = spt_find_page(spt, addr);
-		if (page == NULL)
-			PANIC("(try_handle_fault): stack_growth fail?");
+		// 페이지가 물리 메모리에 없는 경우 -> 프레임 할당 및 로드
+		if (not_present)
+			return vm_do_claim_page(page);
+
+		// 다른 종류의 fault (이론상 발생하지 않아야 함)
+		return false;
 	}
 
-	// 3. write 시도라면 권한 검사
-	if (!page->writable && write)
-		return false;
+	// Case 2: spt에 페이지가 없는 경우 -> stack growth 확인
+	if (page == NULL && not_present) {
+		void *rsp = user ? f->rsp : thread_current()->user_rsp;
 
-	return vm_do_claim_page(page);
+		// stack growth 조건 검사
+		if (USER_STACK - (1 << 20) > addr || addr >= USER_STACK || addr < rsp - 8)
+			return false;
+
+		return vm_stack_growth(addr);
+	}
+
+	// 기타 모든 경우 invalid access
+	return false;
 }
 
 /* Free the page.

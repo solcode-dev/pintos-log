@@ -59,7 +59,7 @@ static bool uninit_initialize(struct page *page, void *kva)
 static void uninit_destroy(struct page *page)
 {
 	struct uninit_page *uninit UNUSED = &page->uninit;
-	/* TODO: Fill this function.
-	 * TODO: If you don't have anything to do, just return. */
+
 	free(uninit->aux);
+	uninit->aux = NULL;
 }

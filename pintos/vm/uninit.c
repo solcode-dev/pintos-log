@@ -52,14 +52,29 @@ static bool uninit_initialize(struct page *page, void *kva)
 	return uninit->page_initializer(page, uninit->type, kva) && (init ? init(page, aux) : true);
 }
 
-/* Free the resources hold by uninit_page. Although most of pages are transmuted
- * to other page objects, it is possible to have uninit pages when the process
- * exit, which are never referenced during the execution.
- * PAGE will be freed by the caller. */
+/* 프로세스 종료 시점까지 한 번도 참조되지 않은 uninit 페이지가 보유한 자원을
+정리한다.​ 대부분의 페이지는 다른 페이지 객체로 전환되지만,
+예외적으로 실행 동안 사용되지 않은
+uninit 페이지가 남을 수 있다.​ PAGE 구조체 자체의 해제는 이 함수를 호출한
+쪽에서 수행한다.*/
 static void uninit_destroy(struct page *page)
 {
-	struct uninit_page *uninit UNUSED = &page->uninit;
-	/* TODO: Fill this function.
-	 * TODO: If you don't have anything to do, just return. */
+	struct uninit_page *uninit UNUSED = &(page->uninit);
+	// uninit 주소는 항상으므로 유효성 체크 안함
+
+	// 파일 페이지가 아니라면 패스
+	if (VM_TYPE(uninit->type) != VM_FILE) {
+		return;
+	}
+
+	// TODO: mmap 구현에 따라 아래 부분 달라짐
+	//  aux가 없다면 패스
+	if (NULL == uninit->aux) {
+		return;
+	}
+
+	// 데이터 삭제
 	free(uninit->aux);
+	// 혹시 모를 초기화. 버릇처럼! - 영근가라사대
+	uninit->aux = NULL;
 }

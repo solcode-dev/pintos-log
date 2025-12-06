@@ -102,56 +102,46 @@ static void kill(struct intr_frame *f)
 	}
 }
 
-/* Page fault handler.  This is a skeleton that must be filled in
-	 to implement virtual memory.  Some solutions to project 2 may
-	 also require modifying this code.
-
-	 At entry, the address that faulted is in CR2 (Control Register
-	 2) and information about the fault, formatted as described in
-	 the PF_* macros in exception.h, is in F's error_code member.  The
-	 example code here shows how to parse that information.  You
-	 can find more information about both of these in the
-	 description of "Interrupt 14--Page Fault Exception (#PF)" in
-	 [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
+/* 호출되는 경우:
+	1. lazy loading: 물리메모리에 아직 로드되기 전에 접근했을 때
+	2. stack growth: 새로운 스택 페이지가 필요할 때
+	3. swap in: swap out되었던 페이지에 다시 접근했을 때
+	4. cow: fork 후에 자식이 부모의 읽기 전용 페이지에 write 시도 할 때
+*/
 static void page_fault(struct intr_frame *f)
 {
-	bool not_present; /* True: not-present page, false: writing r/o page. */
-	bool write;		  /* True: access was write, false: access was read. */
-	bool user;		  /* True: access by user, false: access by kernel. */
-	void *fault_addr; /* Fault address. */
+	bool not_present; /* 페이지가 존재하지 않는가 */
+	bool write;		  /* write 접근인지 */
+	bool user;		  /* user 모드인지 */
+	void *fault_addr; /* 페이지 폴트가 발생한 주소 */
 
-	/* Obtain faulting address, the virtual address that was
-		 accessed to cause the fault.  It may point to code or to
-		 data.  It is not necessarily the address of the instruction
-		 that caused the fault (that's f->rip). */
+	fault_addr = (void *)rcr2(); // CR2 레지스터에서 fault 주소 읽기
 
-	fault_addr = (void *)rcr2();
-
-	/* Turn interrupts back on (they were only off so that we could
-		 be assured of reading CR2 before it changed). */
 	intr_enable();
 
-	/* Determine cause. */
+	// error_code로 원인 파악
+	// 0: 페이지 존재하지 않음 (lazy load, swap in), 1: 권한 위반(write to read-only)
 	not_present = (f->error_code & PF_P) == 0;
-	write = (f->error_code & PF_W) != 0;
-	user = (f->error_code & PF_U) != 0;
+	write = (f->error_code & PF_W) != 0; // 0: 읽기시도, 1: 쓰기시도
+	user =
+		(f->error_code & PF_U) != 0; // true: 유저모드에서 발생한 페이지폴트, 0: 커널모드에서 발생
 
 #ifdef VM
-	/* For project 3 and later. */
+	// vm_try_handle_fault 호출!
 	if (vm_try_handle_fault(f, fault_addr, user, write, not_present))
-		return;
+		return; // 성공하면 프로그램 계속 실행
 #endif
-
+	// 커널모드에서 발생한 페이지폴트
 	if (!user) {
-		f->rip = f->R.rax;
-		f->R.rax = -1;
+		f->rip = f->R.rax; // 복귀주소로 변경
+		f->R.rax = -1;	   // 반환값 -1로 설정해서 실패 표시
 		return;
 	}
 
 	/* Count page faults. */
 	page_fault_cnt++;
 
-	/* If the fault is true fault, show info and exit. */
+	// 실패하면 프로세스 종료
 	printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
 		   not_present ? "not present" : "rights violation", write ? "writing" : "reading",
 		   user ? "user" : "kernel");

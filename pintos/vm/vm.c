@@ -165,9 +165,23 @@ static struct frame *vm_get_frame(void)
 	return frame;
 }
 
-/* Growing the stack. */
-static void vm_stack_growth(void *addr UNUSED)
+// 스택이 필요로 하는 새 페이지를 할당한다
+static bool vm_stack_growth(void *addr UNUSED)
 {
+	// 1. 주소 정렬
+	addr = pg_round_down(addr);
+
+	// 2. 익명 페이지로 할당 (스택은 익명 페이지)
+	if (!vm_alloc_page(VM_ANON, addr, true))
+		return false;
+
+	// 3. 페이지 찾기
+	struct page *new_page = spt_find_page(&thread_current()->spt, addr);
+	if (new_page == NULL)
+		return false;
+
+	// 4. 즉시 물리 메모리에 매핑 (스택은 즉시 사용 가능해야 함)
+	return vm_do_claim_page(new_page);
 }
 
 /* Handle the fault on write_protected page */
@@ -175,27 +189,51 @@ static bool vm_handle_wp(struct page *page UNUSED)
 {
 }
 
-/* Return true on success */
+// 정당한 페이지폴트인지 판단 + 처리
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write, bool not_present)
 {
 	struct supplemental_page_table *spt = &thread_current()->spt;
 
-	// 1. 유효성 검사
-	if (spt == NULL || addr < VM_BOTTOM || is_kernel_vaddr(addr))
+	// 1. 유효성 검사	(NULL 및 커널 주소인지 검사)
+	if (spt == NULL || is_kernel_vaddr(addr) || addr < VM_BOTTOM)
 		return false;
 
 	// 2. spt에 있는지 찾기
 	struct page *page = spt_find_page(spt, addr);
-	if (page == NULL) {
-		// TODO: grow stack 구현하기
+
+	// Case 1: spt에 페이지가 있는 경우 (lazy loading, swap in)
+	if (page != NULL) {
+		// 페이지가 물리 메모리에 없는 경우 -> 프레임 할당 및 로드
+		if (not_present)
+			return vm_do_claim_page(page);
+
+		// 페이지가 물리 메모리에 있는 경우 -> write protection fault
+		if (write && !page->writable)
+			return false; // 쓰기 불가능한 페이지에 쓰기 시도
+
+		// 다른 종류의 fault (이론상 발생하지 않아야 함)
 		return false;
 	}
 
-	// 3. write 시도라면 권한 검사
-	if (!page->writable && write)
-		return false;
+	// Case 2: spt에 페이지가 없는 경우 -> stack growth 확인
+	if (page == NULL && not_present) {
+		void *rsp = user ? f->rsp : thread_current()->rsp;
 
-	return vm_do_claim_page(page);
+		// stack growth 조건 검사
+		// a. 1MB 스택 제한 이내인가? (USER_STACK - 1MB <= addr < USER_STACK)
+		if (USER_STACK - (1 << 20) > addr || addr >= USER_STACK)
+			return false;
+
+		// b. rsp - 8 <= addr < rsp 범위인가?
+		if (addr >= rsp - 8 && addr < rsp)
+			return vm_stack_growth(addr);
+
+		// stack growth 조건 충족 안함 :: invalid access (segfault)
+		return false;
+	}
+
+	// 기타 모든 경우 invalid access
+	return false;
 }
 
 /* Free the page.

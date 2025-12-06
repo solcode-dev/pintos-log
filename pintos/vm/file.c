@@ -62,9 +62,25 @@ static void file_backed_destroy(struct page *page)
 /* Do the mmap */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t offset)
 {
+	// size_t read_bytes = 0;
+
+	// vm_alloc_page_with_initializer()
+
+	/*
+	1. length보다 크거나 같을 때까지 += PGSIZE 해주면서 페이지 늘려주기
+	2. 페이지마다 만들고, vm_alloc_page_with_initializer() 호출해서 파일 & offset 전달하기 (offset
+	reopen하기)
+	3. offset & read_bytes 값 업데이트하기
+	4. init_aux로 file_page struct 전달할거고, init 함수는 lazy_load_segment, VM_TYPE은 VM_FILE로,
+	upage는 page 시작 주소, writable 같이 전달하기
+	*/
 }
 
 /* Do the munmap */
 void do_munmap(void *addr)
 {
+	/*
+	1. addr로 page 검색해서 찾기
+	2. spt_remove_page 호출해서 해당 페이지 삭제하기
+	*/
 }

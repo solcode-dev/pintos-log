@@ -213,10 +213,6 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write
 			PANIC("(try_handle_fault): stack_growth fail?");
 	}
 
-	// printf("DEBUG: Fault Addr: %p\n", addr);
-	// printf("DEBUG: Attempt (Action): %s\n", write ? "WRITE" : "READ");
-	// printf("DEBUG: Real Permission: %s\n", page->writable ? "RW" : "R-Only");
-
 	// 3. write 시도라면 권한 검사
 	if (!page->writable && write)
 		return false;
@@ -285,7 +281,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt)
 
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,
-								  struct supplemental_page_table *src)
+								  struct supplemental_page_table *src, struct file *executable_file)
 {
 	// 0. 널포인터 체크
 	if (dst == NULL || src == NULL)
@@ -293,9 +289,11 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst,
 
 	// 1. dst를 비운다
 	hash_clear(&dst->spt_hash, remove_page_from_spt);
+	src->spt_hash.aux = executable_file;
 
 	// 2. 순회를 하며 copy_page_from_spt 호출
 	hash_apply(&src->spt_hash, copy_page_from_spt);
+	src->spt_hash.aux = NULL;
 
 	return true;
 }
@@ -344,14 +342,21 @@ static void copy_page_from_spt(struct hash_elem *elem, void *aux)
 	struct page *src_page = hash_entry(elem, struct page, spt_hash_elem);
 	void *va = src_page->va;
 	bool writable = src_page->writable;
+	struct file *executable_file = (struct file *)aux;
 
 	switch (VM_TYPE(src_page->operations->type)) {
 		case VM_UNINIT:
-			// AUX 값 복사하기
 			enum vm_type type = page_get_type(src_page);
-			size_t aux_size = sizeof(struct vm_load_aux);
-			void *dst_aux = malloc(aux_size);
-			memcpy(dst_aux, src_page->uninit.aux, aux_size);
+			size_t aux_size = sizeof(struct file_page);
+
+			struct file_page *dst_aux = malloc(aux_size);
+			struct file_page *src_aux = src_page->uninit.aux;
+
+			*dst_aux = (struct file_page){
+				.file = executable_file,
+				.offset = src_aux->offset,
+				.page_read_bytes = src_aux->page_read_bytes,
+			};
 
 			vm_alloc_page_with_initializer(type, va, writable, src_page->uninit.init, dst_aux);
 			return;

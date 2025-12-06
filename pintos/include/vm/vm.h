@@ -35,7 +35,7 @@ enum vm_type {
 struct page_operations;
 struct thread;
 
-#define VM_TYPE(type) ((type) & 7)
+#define VM_TYPE(type) ((type)&7)
 
 /* The representation of "page".
  * This is kind of "parent class", which has four "child class"es, which are
@@ -95,7 +95,8 @@ struct supplemental_page_table {
 #include "threads/thread.h"
 void supplemental_page_table_init(struct supplemental_page_table *spt);
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,
-								  struct supplemental_page_table *src);
+								  struct supplemental_page_table *src,
+								  struct file *executable_file);
 void supplemental_page_table_kill(struct supplemental_page_table *spt);
 struct page *spt_find_page(struct supplemental_page_table *spt, void *va);
 bool spt_insert_page(struct supplemental_page_table *spt, struct page *page);

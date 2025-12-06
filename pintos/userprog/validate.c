@@ -41,7 +41,8 @@ bool buffer_copy_to_user(char *user_dst, const char *kernel_src, size_t max_len)
 	if (user_dst == NULL || kernel_src == NULL || !is_user_vaddr(user_dst))
 		thread_exit();
 	for (size_t i = 0; i < max_len; i++) {
-		if (!put_user(user_dst + i, kernel_src[i]))
+		if (!put_user(user_dst + i, kernel_src[i]) ||
+			!spt_find_page(&thread_current()->spt, user_dst)->writable)
 			thread_exit();
 	}
 	return true;

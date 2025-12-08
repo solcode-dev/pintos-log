@@ -84,6 +84,18 @@ static bool file_backed_swap_out(struct page *page)
 static void file_backed_destroy(struct page *page)
 {
 	struct file_page *file_page UNUSED = &page->file;
+
+	if (page->frame != NULL) {
+		// pte에서 매핑 제거
+		pml4_clear_page(thread_current()->pml4, page->va);
+
+		// 물리메모리도 제거
+		palloc_free_page(page->frame->kva);
+
+		// frame 구조체 해제
+		free(page->frame);
+		page->frame = NULL;
+	}
 }
 
 // length 바이트만큼의 파일을 offset 바이트 지점부터 시작해서,

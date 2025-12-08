@@ -3,6 +3,7 @@
 #include "vm/vm.h"
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
+#include "threads/mmu.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
@@ -55,13 +56,18 @@ static bool file_backed_swap_in(struct page *page, void *kva)
 /* Swap out the page by writeback contents to the file. */
 static bool file_backed_swap_out(struct page *page)
 {
-	struct file_page *file_page UNUSED = &page->file;
+	struct file_page *file_page = &page->file;
+	file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->offset);
+	pml4_set_dirty(thread_current()->pml4, page->va, false);
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page)
 {
-	struct file_page *file_page UNUSED = &page->file;
+	struct file_page *file_page = &page->file;
+
+	if (pml4_is_dirty(thread_current()->pml4, page->va))
+		file_backed_swap_out(page);
 
 	if (page->frame != NULL) {
 		// pte에서 매핑 제거
@@ -152,4 +158,21 @@ static bool lazy_load_file(struct page *page, void *aux)
 /* Do the munmap */
 void do_munmap(void *addr)
 {
+	struct page *mmap_page = spt_find_page(&thread_current()->spt, addr);
+	if (mmap_page == NULL || page_get_type(mmap_page) != VM_FILE)
+		return;
+
+	int length;
+	if (VM_TYPE(mmap_page->operations->type) == VM_FILE) {
+		length = mmap_page->file.length;
+	} else {
+		struct mmap_aux *mmap_aux = mmap_page->uninit.aux;
+		length = mmap_aux->length;
+	}
+
+	for (size_t i = 0; i < length; i++) {
+		struct page *page = spt_find_page(&thread_current()->spt, addr + (PGSIZE * i));
+		spt_remove_page(&thread_current()->spt, page);
+	}
+	file_close(mmap_page->file.file);
 }

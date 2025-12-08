@@ -337,16 +337,17 @@ static int syscall_dup2(int oldfd, int newfd)
 
 static void *syscall_mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 {
-	if (addr == NULL || addr != pg_round_down(addr) || length <= 0 || fd < 0 || offset < 0)
+	if (addr == NULL || addr != pg_round_down(addr) || !is_user_vaddr(addr) || length <= 0 ||
+		fd < 0 || offset < 0 || offset != pg_round_down(offset))
 		return NULL;
 
 	for (size_t i = 0; i < length; i += PGSIZE) {
-		if (spt_find_page(&thread_current()->spt, addr + i) != NULL)
+		if (!is_user_vaddr(addr + i) || spt_find_page(&thread_current()->spt, addr + i) != NULL)
 			return NULL;
 	}
 
 	struct file *file = get_file(thread_current()->fd_table, fd);
-	if (file_length(file) == 0)
+	if (file == NULL || file_length(file) < offset)
 		return NULL;
 
 	for (size_t i = 0; i < (length + PGSIZE - 1) / PGSIZE; i++) {

@@ -337,24 +337,22 @@ static int syscall_dup2(int oldfd, int newfd)
 
 static void *syscall_mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 {
-	if (addr == NULL || is_kernel_vaddr(addr) || pg_ofs(addr) != 0)
-		return NULL;
-
-	if (length == 0 || offset < 0 || offset % PGSIZE != 0)
+	if (addr == NULL || is_kernel_vaddr(addr) || pg_ofs(addr) != 0 || length == 0 || offset < 0 ||
+		pg_ofs(offset) != 0)
 		return NULL;
 
 	size_t read_bytes = length;
-	void *tmp_addr = addr;
+	void *start_addr = addr;
 
 	while (read_bytes > 0) {
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-		if (spt_find_page(&thread_current()->spt, tmp_addr != NULL))
+		if (!is_user_vaddr(start_addr) || spt_find_page(&thread_current()->spt, start_addr) != NULL)
 			return NULL;
 
-		if (is_kernel_vaddr(tmp_addr))
+		if (start_addr <= USER_STACK && start_addr >= USER_STACK - (1 << 20))
 			return NULL;
 
-		tmp_addr += PGSIZE;
+		start_addr += PGSIZE;
 		read_bytes -= page_read_bytes;
 	}
 

@@ -12,6 +12,14 @@ struct file_page {
 	uint32_t page_read_bytes; // 페이지에서 읽어야 하는 바이트의 개수
 };
 
+struct mmap_aux {
+	struct file *file;
+	uint64_t offset;
+	uint32_t page_read_bytes;
+	uint32_t index;
+	uint32_t length;
+};
+
 void vm_file_init(void);
 bool file_backed_initializer(struct page *page, enum vm_type type, void *kva);
 void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t offset);

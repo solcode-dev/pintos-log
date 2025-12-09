@@ -53,6 +53,8 @@ static void syscall_seek(int fd, unsigned position);
 static unsigned syscall_tell(int fd);
 static void syscall_close(int fd);
 static int syscall_dup2(int oldfd, int newfd);
+static void *syscall_mmap(void *addr, size_t length, int writable, int fd, off_t offset);
+static void syscall_munmap(void *addr);
 
 void syscall_init(void)
 {
@@ -122,6 +124,12 @@ void syscall_handler(struct intr_frame *f)
 			break;
 		case SYS_DUP2:
 			f->R.rax = syscall_dup2(arg1, arg2);
+			break;
+		case SYS_MMAP:
+			f->R.rax = syscall_mmap(arg1, arg2, arg3, arg4, arg5);
+			break;
+		case SYS_MUNMAP:
+			syscall_munmap(arg1);
 			break;
 	}
 }
@@ -325,4 +333,40 @@ static int syscall_dup2(int oldfd, int newfd)
 	int result = fd_dup2(thread_current()->fd_table, oldfd, newfd);
 	lock_release(&file_lock);
 	return result;
+}
+
+static void *syscall_mmap(void *addr, size_t length, int writable, int fd, off_t offset)
+{
+	if (addr == NULL || is_kernel_vaddr(addr) || pg_ofs(addr) != 0 || length == 0 || offset < 0 ||
+		pg_ofs(offset) != 0)
+		return NULL;
+
+	size_t read_bytes = length;
+	void *start_addr = addr;
+
+	while (read_bytes > 0) {
+		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+		if (!is_user_vaddr(start_addr) || spt_find_page(&thread_current()->spt, start_addr) != NULL)
+			return NULL;
+
+		if (start_addr <= USER_STACK && start_addr >= USER_STACK - (1 << 20))
+			return NULL;
+
+		start_addr += PGSIZE;
+		read_bytes -= page_read_bytes;
+	}
+
+	struct file *file = get_file(thread_current()->fd_table, fd);
+	if (file == NULL || file == stdout_entry || file == stdin_entry || file_length(file) == 0)
+		return NULL;
+
+	return do_mmap(addr, length, writable, file, offset);
+}
+
+static void syscall_munmap(void *addr)
+{
+	if (addr == NULL || is_kernel_vaddr(addr) || pg_ofs(addr) != 0)
+		return;
+
+	return do_munmap(addr);
 }

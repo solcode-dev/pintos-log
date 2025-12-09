@@ -214,6 +214,8 @@ void do_munmap(void *addr)
 	if (mmap_page == NULL || page_get_type(mmap_page) != VM_FILE)
 		return;
 
+	struct file *mmap_file = mmap_page->file.file;
+
 	int length;
 	if (VM_TYPE(mmap_page->operations->type) == VM_FILE) {
 		length = mmap_page->file.length;
@@ -226,4 +228,6 @@ void do_munmap(void *addr)
 		struct page *page = spt_find_page(&thread_current()->spt, addr + (PGSIZE * i));
 		spt_remove_page(&thread_current()->spt, page);
 	}
+
+	file_close(mmap_file);
 }

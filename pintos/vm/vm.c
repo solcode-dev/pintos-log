@@ -7,6 +7,8 @@
 #include "vm/inspect.h"
 #include <string.h>
 
+struct lock vm_lock;
+
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void vm_init(void)
@@ -19,6 +21,7 @@ void vm_init(void)
 	register_inspect_intr();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	lock_init(&vm_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -38,7 +41,7 @@ enum vm_type page_get_type(struct page *page)
 /* Helpers */
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
-static struct frame *vm_evict_frame(void);
+static bool vm_evict_frame(void);
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
@@ -124,23 +127,90 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 	vm_dealloc_page(page);
 }
 
-/* Get the struct frame, that will be evicted. */
+// 자주 사용되지 않은 페이지를 victim으로 선택
 static struct frame *vm_get_victim(void)
 {
 	struct frame *victim = NULL;
-	/* TODO: The policy for eviction is up to you. */
+	lock_acquire(&vm_lock);
 
-	return victim;
+	// spt 순회하며 va얻어서 access 비트 체크
+	struct hash_iterator i;
+
+	hash_first(&i, &thread_current()->spt.spt_hash);
+	while (hash_next(&i)) {
+		struct page *curr_page = hash_entry(hash_cur(&i), struct page, spt_hash_elem);
+
+		// frame이 없는 페이지는 스킵
+		if (curr_page->frame == NULL)
+			continue;
+
+		// second-chance algorithm
+		// 최근 접근하지 않았으면 victim. 그리고 참조비트는 0으로 초기화된다.
+		if (pml4_is_accessed(thread_current()->pml4, curr_page->va)) {
+			// 기회를 준다.
+			pml4_set_accessed(thread_current()->pml4, curr_page->va, false);
+		} else {
+			victim = curr_page->frame;
+			lock_release(&vm_lock);
+			return victim;
+		}
+	}
+
+	// 한번 더 확인
+	struct page *first_page = NULL;
+	hash_first(&i, &thread_current()->spt.spt_hash);
+	while (hash_next(&i)) {
+		struct page *curr_page = hash_entry(hash_cur(&i), struct page, spt_hash_elem);
+
+		// frame이 있는 첫 번째 페이지를 저장
+		if (first_page == NULL && curr_page->frame != NULL) {
+			first_page = curr_page;
+		}
+
+		// frame이 없는 페이지는 스킵
+		if (curr_page->frame == NULL)
+			continue;
+
+		// 최근 접근하지 않았으면 victim
+		if (!pml4_is_accessed(thread_current()->pml4, curr_page->va)) {
+			victim = curr_page->frame;
+			lock_release(&vm_lock);
+			return victim;
+
+#ifdef DEBUG
+			printf("[DEBUG]   Page %p: NOT ACCESSED in 2nd round -> VICTIM FOUND!\n",
+				   curr_page->va);
+			printf("[DEBUG] vm_get_victim: Second round victim found\n");
+#endif
+		}
+	}
+	// 두바퀴 돌았는데도 victim 없으면 제일 앞에 있는 페이지가 victim.
+	lock_release(&vm_lock);
+	return first_page->frame;
 }
 
 /* Evict one page and return the corresponding frame.
- * Return NULL on error.*/
-static struct frame *vm_evict_frame(void)
+  에러시 false 를 반환.*/
+static bool vm_evict_frame(void)
 {
-	struct frame *victim UNUSED = vm_get_victim();
-	/* TODO: swap out the victim and return the evicted frame. */
+	struct frame *victim = vm_get_victim();
+	if (victim == NULL) {
+		printf("[DEBUG] vm_evict_frame: FAIL - No victim found\n");
+		return false; // victim을 찾지 못함
+	}
 
-	return NULL;
+	// victim 페이지를 swap out
+	struct page *victim_page = victim->page;
+	if (victim_page == NULL) {
+		printf("[DEBUG] vm_evict_frame: FAIL - Victim frame has no page\n");
+		return false;
+	}
+
+	// swap_out 호출 (각 타입에 맞는 swap_out이 호출됨)
+	bool result = swap_out(victim_page);
+	printf("======= [DEBUG] vm_evict_frame: %d \n", result);
+
+	return result;
 }
 
 /* palloc()으로 프레임을 획득한다. 사용가능한 페이지가 없으면 페이지를 제거한다.
@@ -158,8 +228,21 @@ static struct frame *vm_get_frame(void)
 		.kva = palloc_get_page(PAL_USER | PAL_ZERO) // 사용자풀에서 물리 페이지 할당받는다
 	};
 
-	if (frame->kva == NULL)
-		PANIC("(vm_get_frame) TODO: swap out 미구현");
+	// 사용가능한 물리 페이지가 없을 경우 기존 페이지를 제거한다
+	if (frame->kva == NULL) {
+		// evict로 물리 메모리 공간 확보
+		if (!vm_evict_frame()) {
+			free(frame);
+			PANIC("vm_get_frame: Cannot evict any frame");
+		}
+
+		// 다시 물리 페이지 할당 시도
+		frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
+		if (frame->kva == NULL) {
+			free(frame);
+			PANIC("vm_get_frame: Cannot allocate page even after eviction");
+		}
+	}
 
 	ASSERT(frame->page == NULL);
 	return frame;
@@ -201,6 +284,8 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write
 		// 페이지가 물리 메모리에 있는 경우 -> write protection fault
 		if (write && !page->writable)
 			return false; // 쓰기 불가능한 페이지에 쓰기 시도
+
+		// 페이지가 아직 물리 메모리에 로드되지 않은 상태(not_present == true)
 
 		// 페이지가 물리 메모리에 없는 경우 -> 프레임 할당 및 로드
 		if (not_present)
@@ -331,8 +416,8 @@ static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED)
 {
 	struct page *curr_page = hash_entry(elem, struct page, spt_hash_elem);
 
-	// if (page_get_type(curr_page) == VM_FILE) // NOTE
-	// 	swap_out(curr_page);
+	if (page_get_type(curr_page) == VM_FILE) // NOTE
+		swap_out(curr_page);
 
 	vm_dealloc_page(curr_page);
 }

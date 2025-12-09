@@ -80,9 +80,12 @@ static void kill(struct intr_frame *f)
 		case SEL_UCSEG:
 			/* User's code segment, so it's a user exception, as we
 				 expected.  Kill the user process.  */
+#ifdef DEBUG
 			printf("%s: dying due to interrupt %#04llx (%s).\n", thread_name(), f->vec_no,
 				   intr_name(f->vec_no));
 			intr_dump_frame(f);
+#endif
+
 			thread_exit();
 
 		case SEL_KCSEG:
@@ -96,8 +99,11 @@ static void kill(struct intr_frame *f)
 		default:
 			/* Some other code segment?  Shouldn't happen.  Panic the
 				 kernel. */
+#ifdef DEBUG
+
 			printf("Interrupt %#04llx (%s) in unknown segment %04x\n", f->vec_no,
 				   intr_name(f->vec_no), f->cs);
+#endif
 			thread_exit();
 	}
 }
@@ -137,7 +143,7 @@ static void page_fault(struct intr_frame *f)
 	user = (f->error_code & PF_U) != 0;
 
 #ifdef VM
-	/* For project 3 and later. */
+	// 만약(if) 핸들링에 성공했다면(true) -> return; (함수 종료, 정상 복귀)
 	if (vm_try_handle_fault(f, fault_addr, user, write, not_present))
 		return;
 #endif
@@ -151,9 +157,12 @@ static void page_fault(struct intr_frame *f)
 	/* Count page faults. */
 	page_fault_cnt++;
 
-	/* If the fault is true fault, show info and exit. */
+#ifdef DEBUG
+	/* 상세 정보 출력 */
 	printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
 		   not_present ? "not present" : "rights violation", write ? "writing" : "reading",
 		   user ? "user" : "kernel");
+#endif
+
 	kill(f);
 }

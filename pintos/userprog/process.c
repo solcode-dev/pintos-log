@@ -718,7 +718,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 		};
 		
 		// 파일은 mmap, stack은 anon, 실행파일도 anon!!! write back 기준으로!
-		if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment,
+		if (!vm_alloc_page_with_initializer(VM_ANON | VM_LOAD_MARKER, upage, writable, lazy_load_segment,
 											file_page_aux))
 			return false;
 			

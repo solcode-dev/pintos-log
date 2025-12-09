@@ -200,7 +200,7 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write
 
 		// 페이지가 물리 메모리에 있는 경우 -> write protection fault
 		if (write && !page->writable)
-			return false; // 쓰기 불가능한 페이지에 쓰기 시도
+			thread_exit(); // 쓰기 불가능한 페이지에 쓰기 시도
 
 		// 페이지가 물리 메모리에 없는 경우 -> 프레임 할당 및 로드
 		if (not_present)
@@ -216,7 +216,7 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user, bool write
 
 		// stack growth 조건 검사
 		if (USER_STACK - (1 << 20) > addr || addr >= USER_STACK || addr < rsp - 8)
-			return false;
+			thread_exit();
 
 		return vm_stack_growth(addr);
 	}
@@ -330,10 +330,6 @@ static bool spt_hash_less_func(const struct hash_elem *elem_a, const struct hash
 static void remove_page_from_spt(struct hash_elem *elem, void *aux UNUSED)
 {
 	struct page *curr_page = hash_entry(elem, struct page, spt_hash_elem);
-
-	// if (page_get_type(curr_page) == VM_FILE) // NOTE
-	// 	swap_out(curr_page);
-
 	vm_dealloc_page(curr_page);
 }
 
@@ -348,13 +344,20 @@ static void copy_page_from_spt(struct hash_elem *elem, void *aux)
 
 	switch (VM_TYPE(src_page->operations->type)) {
 		case VM_UNINIT:
-			// AUX 값 복사하기
 			enum vm_type type = page_get_type(src_page);
-			size_t aux_size = sizeof(struct vm_load_aux);
-			void *dst_aux = malloc(aux_size);
-			memcpy(dst_aux, src_page->uninit.aux, aux_size);
+			if (src_page->uninit.type & VM_LOAD_MARKER) {
+				struct vm_load_aux *dst_aux = malloc(sizeof(*dst_aux));
+				memcpy(dst_aux, src_page->uninit.aux, sizeof(*dst_aux));
+				vm_alloc_page_with_initializer(type, va, writable, src_page->uninit.init, dst_aux);
+				return;
+			}
 
-			vm_alloc_page_with_initializer(type, va, writable, src_page->uninit.init, dst_aux);
+			if (type == VM_FILE) {
+				struct mmap_aux *dst_aux = malloc(sizeof(*dst_aux));
+				memcpy(dst_aux, src_page->uninit.aux, sizeof(*dst_aux));
+				vm_alloc_page_with_initializer(type, va, writable, src_page->uninit.init, dst_aux);
+				return;
+			}
 			return;
 		case VM_FILE:
 			vm_alloc_page_with_initializer(VM_FILE, va, writable, NULL, &src_page->file);

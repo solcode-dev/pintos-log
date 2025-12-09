@@ -365,4 +365,8 @@ static void *syscall_mmap(void *addr, size_t length, int writable, int fd, off_t
 
 static void syscall_munmap(void *addr)
 {
+	if (addr == NULL || is_kernel_vaddr(addr) || pg_ofs(addr) != 0)
+		return;
+
+	return do_munmap(addr);
 }

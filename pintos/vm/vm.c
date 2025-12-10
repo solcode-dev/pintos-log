@@ -9,6 +9,10 @@
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
+
+static struct list frame_list;
+static struct lock frame_table_lock;
+
 void vm_init(void)
 {
 	vm_anon_init();
@@ -18,7 +22,8 @@ void vm_init(void)
 #endif
 	register_inspect_intr();
 	/* DO NOT MODIFY UPPER LINES. */
-	/* TODO: Your code goes here. */
+	list_init(&frame_list);
+	lock_init(&frame_table_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -77,6 +82,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 	// page 구조체에 값 넣기
 	uninit_new(page, upage, init, type, aux, initializer);
 	page->writable = writable;
+	page->owner_thread = thread_current();
 
 	if (!spt_insert_page(spt, page))
 		goto err;
@@ -127,9 +133,7 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 /* Get the struct frame, that will be evicted. */
 static struct frame *vm_get_victim(void)
 {
-	struct frame *victim = NULL;
-	/* TODO: The policy for eviction is up to you. */
-
+	struct frame *victim = list_entry(list_pop_front(&frame_list), struct frame, frame_elem);
 	return victim;
 }
 
@@ -137,10 +141,17 @@ static struct frame *vm_get_victim(void)
  * Return NULL on error.*/
 static struct frame *vm_evict_frame(void)
 {
-	struct frame *victim UNUSED = vm_get_victim();
-	/* TODO: swap out the victim and return the evicted frame. */
+	lock_acquire(&frame_table_lock);
+	struct frame *victim = vm_get_victim();
+	struct page *page = victim->page;
 
-	return NULL;
+	swap_out(page);
+
+	pml4_clear_page(page->owner_thread->pml4, page->va);
+	page->frame = NULL;
+	victim->page = NULL;
+	lock_release(&frame_table_lock);
+	return victim;
 }
 
 /* palloc()으로 프레임을 획득한다. 사용가능한 페이지가 없으면 페이지를 제거한다.
@@ -148,6 +159,11 @@ static struct frame *vm_evict_frame(void)
  * 메모리 공간을 확보하기 위해 프레임을 제거한다. */
 static struct frame *vm_get_frame(void)
 {
+
+	void *kva = palloc_get_page(PAL_USER | PAL_ZERO);
+	if (kva == NULL)
+		return vm_evict_frame();
+
 	// frame 구조체를 생성한다
 	struct frame *frame = malloc(sizeof(*frame));
 	if (frame == NULL)
@@ -155,11 +171,8 @@ static struct frame *vm_get_frame(void)
 
 	*frame = (struct frame){
 		.page = NULL,
-		.kva = palloc_get_page(PAL_USER | PAL_ZERO) // 사용자풀에서 물리 페이지 할당받는다
+		.kva = kva,
 	};
-
-	if (frame->kva == NULL)
-		PANIC("(vm_get_frame) TODO: swap out 미구현");
 
 	ASSERT(frame->page == NULL);
 	return frame;
@@ -253,6 +266,9 @@ static bool vm_do_claim_page(struct page *page)
 {
 	// 1. 물리 프레임을 할당한다 (프레임에 의미있는 데이터는 없는 상태)
 	struct frame *frame = vm_get_frame();
+	lock_acquire(&frame_table_lock);
+	list_push_back(&frame_list, &frame->frame_elem);
+	lock_release(&frame_table_lock);
 
 	// 2. 페이지와 프레임을 서로 연결한다
 	frame->page = page;

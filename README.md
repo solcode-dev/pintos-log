@@ -39,18 +39,31 @@
 
 ---
 
-## 🤝 Collaboration & Process (협업 방식)
+## 🤝 Collaboration & Process
 
-### 📅 Daily Scrum & Issue Tracking
-매일 아침 **Daily Scrum**을 진행하며 '어제 한 일', '오늘 할 일', 'Blocker(방해 요소)'를 공유했습니다.
-단순한 구두 공유에 그치지 않고, **GitHub Issues**를 활용하여 매일의 개발 진행 상황과 트러블 슈팅 내용을 기록으로 남겼습니다.
+### 1. Workflow & Pair Programming
+저희 팀은 **낮에는 개인 작업, 밤에는 페어 프로그래밍** 이라는 루틴을 따랐습니다.
+
+* **VS Code Live Share:** 복잡한 커널 로직을 구현할 때 **Live Share**를 적극 활용했습니다.
+* 실시간으로 한 화면에서 코드를 작성하며 논리적 오류를 즉시 잡아내고 코드 퀄리티를 높였습니다.
+  
+* **Role-Based Branching:**
+  * `feat/*`: 낮 시간 동안 개인이 맡은 기능을 선행 연구하고 구현을 시도하는 브랜치
+  * `pair/*`: 저녁 시간에 팀원이 모여 검증된 코드를 함께 작성하고 완성하는 브랜치 
+
+### 2. Team Convention & Knowledge Sharing (Wiki)
+협업의 기준을 맞추기 위해 **GitHub Wiki**를 적극적으로 활용하여 규칙을 문서화하고 지식을 축적했습니다.
+👉 **[Team Wiki 바로가기](https://github.com/solcode-dev/pintos-log/wiki)**
+
+* **Coding Convention:** Linux Kernel Style을 기반으로 들여쓰기(4 spaces), 중괄호 위치 등을 통일하여 가독성을 확보했습니다. 
+* **Commit Message Strategy:** `feat`, `fix`, `docs`, `refactor` 등 타입을 명확히 구분하고, 한글/영어 혼용을 방지하는 규칙을 세워 히스토리 관리를 체계화했습니다. 
+* **Knowledge Base:** 난이도가 높은 개념(Context Passing, 구조체 초기화 등)을 공부한 뒤 Wiki에 정리하여 공유함으로써, 팀원 전체의 기술 이해도를 상향 평준화했습니다.
+
+### 3. Daily Scrum & Issue Tracking
+매일 아침 **Daily Scrum**을 진행하며 '어제 한 일', '오늘 할 일', 'Blocker(방해 요소)'를 공유했습니다. 구두 공유에 그치지 않고 **GitHub Issues**에 기록을 남겨 프로젝트의 진척도를 투명하게 관리했습니다.
 
 ![Daily Scrum Log](./project3_daily.png)
-<br> *(위 이미지는 실제 프로젝트 진행 당시 매일 기록한 데일리 스크럼 이슈 목록입니다)*
-
-* **기간:** 2025.11.28 ~ 2025.12.10 (project3 virtual memory 집중 개발 기간)
-* **방식:** 매일 이슈 생성 -> 댓글로 진행 상황 공유 -> 코드 리뷰 및 머지
-* **효과:** 복잡한 Pintos 프로젝트에서 서로의 진척도를 투명하게 파악하고, 기술적인 어려움을 빠르게 해결할 수 있었습니다.
+<br/>*(실제 프로젝트 진행 당시 매일 기록한 데일리 스크럼 및 이슈 트래킹 내역)*
 
 ---
 
